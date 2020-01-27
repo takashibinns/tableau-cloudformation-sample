@@ -1,0 +1,535 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+  "Description" : "AWS CloudFormation template, which creates a brand new Tableau Server",
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Label": {
+            "default": "AWS Settings"
+          },
+          "Parameters": [
+            "InstanceType",
+            "SubnetID",
+            "KeyName"
+          ]
+        },
+        {
+          "Label": {
+            "default": "Tableau Settings"
+          },
+          "Parameters": [
+            "AdminUsername",
+            "AdminPassword",
+            "InstallerURL",
+            "LicenseKey"
+          ]
+        }
+      ]
+    }
+  },
+  "Parameters" : {
+    "KeyName": {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instance",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "ConstraintDescription" : "must be the name of an existing EC2 KeyPair."
+    },
+    "InstanceType" : {
+      "Description" : "EC2 instance type",
+      "Type" : "String",
+      "Default" : "m5.4xlarge",
+      "AllowedValues" : [ "m5.2xlarge", "m5.4xlarge", "m5.8xlarge"],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    },
+    "StorageSize" : {
+      "Description" : "Size (GB) of the Tableau Server's root volume",
+      "Type" : "String",
+      "Default" : "200"
+    },
+    "SubnetID" : {
+      "Description" : "Subnet ID: Where should the new Tableau Server live?",
+      "Type" : "String",
+      "Default" : "<my-subnet-id>",
+      "AllowedValues" : [ "<subnet-1", "subnet-2"]
+    },
+    "AdminUsername" : {
+      "Description" : "Username for the local admin user (cannot be 'tableau' or 'tsmagent' or 'admin' or 'root')",
+      "Type" : "String",
+      "MinLength": "1",
+      "MaxLength": "30",
+      "Default" : "tabmin"
+    },
+    "AdminPassword" : {
+      "Description" : "Password for the local admin user",
+      "Type" : "String",
+      "MinLength": "1",
+      "NoEcho": "true",
+      "Default" : "SomeStrongPassword123!"
+    },
+    "InstallerURL" : {
+      "Description" : "URL to get the latest version of Tableau Server",
+      "Type" : "String",
+      "Default" : "https://downloads.tableau.com/esdalt/2019.4.2/tableau-server-2019-4-2.x86_64.rpm"
+    },
+    "LicenseKey" : {
+      "Description" : "License Key to activate Tableau Server",
+      "Type" : "String",
+      "Default" : "<my-license-key>"
+    }
+  },
+  "Mappings" : {
+    "aws": {
+      "LoadBalancerTargetGroup": {
+        "tableauserver": "arn:aws:elasticloadbalancing:us-west-2:968006055560:targetgroup/test-for-cf/ca15dc21851ca1e0",
+        "tsm": "arn:aws:elasticloadbalancing:us-west-2:968006055560:targetgroup/test-for-cf2/6d4cf677d8eb00fe",
+        "repo": "arn:aws:elasticloadbalancing:us-west-2:968006055560:targetgroup/test-for-cf3/9241ec20778b5d27"
+      },
+      "s3": {
+        "bucket": "<s3-bucket-name>",
+        "backups": "/path/to/backups"
+      },
+      "ec2": {
+        "ami": "ami-0c5204531f799e0c6",
+        "securitygroups": "securitygroup1,securitygroup2,securitygroup3",
+        "iaminstanceprofile": "my-iam-role"
+      }
+    },
+    "tableau": {
+      "Repository":{
+        "user": "readonly",
+        "password": "my-strong-repository-password"
+      },
+      "AutomatedInstaller": {
+        "url": "https://github.com/tableau/server-install-script-samples/raw/master/linux/automated-installer/packages/tableau-server-automated-installer-2019-1.noarch.rpm",
+        "path" :"/opt/tableau/tableau_server_automated_installer/automated-installer.20191.19.0321.1733"
+      },
+      "Backups": {
+        "script":"https://raw.githubusercontent.com/takashibinns/tableau-cloudformation-sample/master/backup.sh"
+      }
+    }
+  },
+  "Resources" : {
+    "TableauServerEC2" : {
+      "Type" : "AWS::EC2::Instance",
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "configSets":{
+            "Setup": [ "1","2","3","4","5","6"]
+          },
+          "1": {
+            "packages": {
+                "rpm": {
+                    "epel-release": "https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm",
+                    "postgresql-odbc": "https://downloads.tableau.com/drivers/linux/yum/tableau-driver/tableau-postgresql-odbc-09.06.0500-1.x86_64.rpm"
+                },
+                "yum": {
+                    "awscli": []
+                }
+            },
+            "files": {
+              "/tmp/secrets.properties": {
+                "mode": "640",
+                "content": {
+                  "Fn::Join": [
+                    "\n",
+                    [
+                      {
+                        "Fn::Sub": "tableau_server_admin_user='${AdminUsername}'"
+                      },
+                      {
+                        "Fn::Sub": "tableau_server_admin_pass='${AdminPassword}'"
+                      },
+                      {
+                        "Fn::Sub": "tsm_admin_user='${AdminUsername}'"
+                      },
+                      {
+                        "Fn::Sub": "tsm_admin_pass='${AdminPassword}'"
+                      }
+                    ]
+                  ]
+                }
+              },
+              "/tmp/tableau-server.rpm": {
+                "source": {
+                  "Ref": "InstallerURL"
+                }
+              },
+              "/tmp/automated-installer.rpm":{
+                "mode": "550",
+                "source": { "Fn::FindInMap" : [ "tableau", "AutomatedInstaller", "url"]}
+              },
+              "/tmp/installer/registration.json": {
+                "content": {
+                  "first_name": "Happy",
+                  "last_name": "Admin",
+                  "email": "admin@company.com",
+                  "company": "Some Company",
+                  "title": "Tableau Admin",
+                  "department": "IT",
+                  "industry": "Technology",
+                  "phone": "1234567890",
+                  "city": "Seattle",
+                  "state": "WA",
+                  "zip": "9813",
+                  "country": "USA"
+                }
+              },
+              "/tmp/installer/config.json": {
+                "content": {
+                  "configEntities": {
+                    "identityStore": {
+                      "_type": "identityStoreType",
+                      "type": "local"
+                    }
+                  }
+                }
+              },
+              "/tmp/backup/backup.sh": {
+                "mode": "550",
+                "source": { "Fn::FindInMap" : [ "tableau", "Backups", "script"]}
+              },
+              "/etc/cron.d/tableau-server-backup": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "#  Backup Tableau Server to S3, every sunday","\n",
+                      "SHELL=/bin/bash","\n",
+                      "PATH=/sbin:/bin:/user/sbin:/usr/bin","\n",
+                      "MAILTO=root","\n",
+                      "10 5 * * 7  root  /tmp/backup/backup.sh ",{"Fn::FindInMap": ["aws","s3","bucket"]}," ",{"Fn::FindInMap": ["aws","s3","backups"]}," &>> /tmp/backups.log","\n",
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          "2":{
+            "commands": {
+              "adduser": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "useradd ",
+                      {"Ref": "AdminUsername"}
+                    ]
+                  ]
+                }
+              },
+              "setpasswd": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "echo ",
+                      {"Ref": "AdminPassword"},
+                      " | passwd ",
+                      {"Ref": "AdminUsername"},
+                      " --stdin"
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          "3":{
+            "commands": {
+              "config": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "LatestConfig=$(aws s3 ls ", { "Fn::FindInMap" : [ "aws", "s3", "bucket"]}, { "Fn::FindInMap" : [ "aws", "s3", "backups"]}," --recursive | grep '.*settings.json' | sort | tail -n 1 | awk '{print $4}')",
+                      "\n",
+                      "aws s3 cp s3://", { "Fn::FindInMap" : [ "aws", "s3", "bucket"]}, "/$LatestConfig /tmp/backup/settings.json"
+                    ]
+                  ]
+                },
+                "env":"",
+                "cwd":"/tmp"
+              },
+              "tsbak": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "LatestBackup=$(aws s3 ls ", { "Fn::FindInMap" : [ "aws", "s3", "bucket"]}, { "Fn::FindInMap" : [ "aws", "s3", "backups"]}, " --recursive | grep '.*.tsbak' | sort | tail -n 1 | awk '{print $4}')",
+                      "\n",
+                      "aws s3 cp s3://", { "Fn::FindInMap" : [ "aws", "s3", "bucket"]}, "/$LatestBackup /tmp/backup/backup.tsbak"
+                    ]
+                  ]
+                },
+                "env":"",
+                "cwd":"/tmp"
+              }
+            }
+          },
+          "4":{
+            "commands": {
+              "install": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "",
+                      "sudo yum install -y automated-installer.rpm",
+                      "\n",
+                      "sudo ", { "Fn::FindInMap" : [ "tableau", "AutomatedInstaller", "path"]}, "/automated-installer",
+                      " -s secrets.properties -f installer/config.json -r installer/registration.json -a",
+                      {"Ref": "AdminUsername"},
+                      " --accepteula -k ",
+                      {"Ref": "LicenseKey"},
+                      " tableau-server.rpm"
+                    ]
+                  ]
+                },
+                "cwd":"/tmp"
+              }
+            }
+          },
+          "5":{
+            "commands": {
+              "1a-copy":{
+                "cwd": "/var/opt/tableau/tableau_server/data/tabsvc/files/backups/",
+                "command":"sudo cp /tmp/backup/backup.tsbak backup.tsbak"
+              },
+              "2a-permissions":{
+                "cwd": "/tmp/backup",
+                "command":"sudo chmod o+rx settings.json"
+              },
+              "2b-permissions":{
+                "cwd": "/var/opt/tableau/tableau_server/data/tabsvc/files/backups/",
+                "command":"sudo chmod o+rx backup.tsbak"
+              },
+              "3-stop": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "echo ",
+                      {"Ref": "AdminPassword"},
+                      " | su - ",
+                      {"Ref": "AdminUsername"},
+                      " -c 'tsm stop'"
+                    ]
+                  ]
+                }
+              },
+              "4-restore": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "echo ",
+                      {"Ref": "AdminPassword"},
+                      " | su - ",
+                      {"Ref": "AdminUsername"},
+                      " -c 'tsm maintenance restore --file backup.tsbak'"
+                    ]
+                  ]
+                }
+              },
+              "5-config": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "echo ",
+                      {"Ref": "AdminPassword"},
+                      " | su - ",
+                      {"Ref": "AdminUsername"},
+                      " -c 'tsm settings import -f /tmp/backup/settings.json --config-only --force-keys'"
+                    ]
+                  ]
+                }
+              },
+              "6-apply": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "echo ",
+                      {"Ref": "AdminPassword"},
+                      " | su - ",
+                      {"Ref": "AdminUsername"},
+                      " -c 'tsm pending-changes apply'"
+                    ]
+                  ]
+                }
+              },
+              "7-start": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "echo ",
+                      {"Ref": "AdminPassword"},
+                      " | su - ",
+                      {"Ref": "AdminUsername"},
+                      " -c 'tsm start'"
+                    ]
+                  ]
+                }
+              },
+              "8-repo": {
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ 
+                      "echo ",
+                      {"Ref": "AdminPassword"},
+                      " | su - ",
+                      {"Ref": "AdminUsername"},
+                      " -c 'tsm data-access repository-access enable --repository-password ",
+                      { "Fn::FindInMap" : [ "tableau", "Repository", "password"]},
+                      " --repository-user ",
+                      { "Fn::FindInMap" : [ "tableau", "Repository", "user"]},
+                      " --ignore-prompt'"
+                    ]
+                  ]
+                }
+              }
+            }
+          },
+          "6":{
+            "commands":{
+              "1-clear-lb":{
+                "command": {
+                  "Fn::Join": [
+                    "",
+                    [ "INSTANCES=$(aws elbv2 describe-target-health --target-group-arn ",
+                      { "Fn::FindInMap" : [ "aws", "LoadBalancerTargetGroup", "tableauserver"]},
+                      " --region ",
+                      { "Ref" : "AWS::Region" },
+                      " --query 'TargetHealthDescriptions[*].Target.Id' | tr -dt '[],\"') \n",
+                      "",
+                      "aws ec2 stop-instances --region ",
+                      { "Ref" : "AWS::Region" },
+                      " --instance-ids $INSTANCES "
+                    ]
+                  ]
+                }
+              },
+              "2-add-to-ts-lb":{
+                "cwd":"/tmp/",
+                "command":  {
+                  "Fn::Join": [
+                    "",
+                    [ "INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)\n",
+                      "aws elbv2 register-targets --target-group-arn ",
+                      { "Fn::FindInMap" : [ "aws", "LoadBalancerTargetGroup", "tableauserver"]},
+                      " --region ",
+                      { "Ref" : "AWS::Region" },
+                      " --targets Id=$INSTANCE_ID"
+                    ]
+                  ]
+                }
+              },
+              "3-add-to-tsm-lb":{
+                "cwd":"/tmp/",
+                "command":  {
+                  "Fn::Join": [
+                    "",
+                    [ "INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)\n",
+                      "aws elbv2 register-targets --target-group-arn ",
+                      { "Fn::FindInMap" : [ "aws", "LoadBalancerTargetGroup", "tsm"]},
+                      " --region ",
+                      { "Ref" : "AWS::Region" },
+                      " --targets Id=$INSTANCE_ID"
+                    ]
+                  ]
+                }
+              },
+              "4-add-to-repo-lb":{
+                "cwd":"/tmp/",
+                "command":  {
+                  "Fn::Join": [
+                    "",
+                    [ "INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)\n",
+                      "aws elbv2 register-targets --target-group-arn ",
+                      { "Fn::FindInMap" : [ "aws", "LoadBalancerTargetGroup", "repo"]},
+                      " --region ",
+                      { "Ref" : "AWS::Region" },
+                      " --targets Id=$INSTANCE_ID"
+                    ]
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "Properties" : {
+        "InstanceType" : { "Ref" : "InstanceType" },
+        "SubnetId": { "Ref" : "SubnetID" },
+        "SecurityGroupIds" : { 
+          "Fn::Split" : [ 
+            ",", 
+            { "Fn::FindInMap": [ "aws", "ec2", "securitygroups" ] }
+          ]
+        },
+        "IamInstanceProfile" : { "Fn::FindInMap" : [ "aws", "ec2", "iaminstanceprofile"]},
+        "BlockDeviceMappings": [
+            {
+                "DeviceName": "/dev/xvda",
+                "Ebs": {
+                    "VolumeType": "io1",
+                    "Iops": "300",
+                    "DeleteOnTermination": "true",
+                    "VolumeSize": { "Ref" : "StorageSize" }
+                }
+            }
+        ],
+        "EbsOptimized": true,
+        "KeyName" : { "Ref" : "KeyName" },
+        "ImageId" : { "Fn::FindInMap" : [ "aws", "ec2", "ami"]},
+        "Tags": [
+          {"Key": "Description", "Value":"EC2 Instance for our Tableau Server"}
+        ],
+        "UserData" : { 
+          "Fn::Base64" : { 
+            "Fn::Join" : [
+              "", 
+              [
+               "#!/bin/bash -xe\n",
+               "",
+               "# Update name tag for this instance \n",
+               "NEW_NAME=\"Tableau Server ($(date +%m-%d-%Y))\" \n",
+               "AWS_INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id) \n",
+               "aws ec2 create-tags --resources $AWS_INSTANCE_ID --region ", { "Ref" : "AWS::Region" }, " --tags Key=Name,Value=\"$NEW_NAME\" \n",
+               "",
+               "# Install the files and packages from the metadata\n",
+               "/opt/aws/bin/cfn-init -v ",
+               "         --stack ", { "Ref" : "AWS::StackName" },
+               "         --resource TableauServerEC2 ",
+               "         --configsets Setup",
+               "         --region ", { "Ref" : "AWS::Region" }, "\n",
+               "",
+               "# Signal the status from this instance\n",
+               "/opt/aws/bin/cfn-signal -e $? --stack ", { "Ref": "AWS::StackName"}, " --resource TableauServerEC2 --region ", {"Ref": "AWS::Region"}, "\n"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    "WaitHandle" : {
+      "Type" : "AWS::CloudFormation::WaitConditionHandle"
+    },
+    "WaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : "TableauServerEC2",
+      "Properties" : {
+        "Handle" : {"Ref" : "WaitHandle"},
+        "Timeout" : "10800"
+      }
+    }
+  },
+  "Outputs" : {
+    "InstanceId" : {
+      "Description" : "InstanceId of the newly created EC2 instance",
+      "Value" : { "Ref" : "TableauServerEC2" }
+    }
+  }
+}
