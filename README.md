@@ -22,7 +22,7 @@ We need a place to store our Tableau Server backups, and the best place to do th
 An optional setting within S3 is to set a management rule for automatically cleaning up old backups.  You can use a _lifecycle rule_ to automatically delete objects older than _x_ days.
 
 ### SSL Certificate
-
+In order to ensure all traffic to your Tableau Server is secure, we need to use a SSL Certificate.  Search in AWS for Certificate Manager, in order to get a certificate.  This process will vary, depending on your AWS configuration and corporate policies, but there is a good guide [here](https://docs.aws.amazon.com/acm/latest/userguide/gs-acm-request-public.html) for helping create your first certificate.  We will use the certificate you create, in when creating our load balancers.
 
 ### Load Balancers
 There are 3 services you may want to expose on your Tableau Server: the Tableau Server web app, TSM, and repository.  In order to safely expose these, you will need a load balancer for each.  The Tableau Server and TSM web apps require application load balancers, and the repository needs a network load balancer.
@@ -36,7 +36,7 @@ Security groups will depend on your AWS settings.  My setup includes a default g
 
 The next step for configuring your load balancer is to setup a new target group.  This defines the group of EC2 instances that will receive incoming HTTP requests.  Give your group a name, and leave the rest of the settings.  The last step is to pick your EC2 instances as targets.  We can leave this blank, since the Cloudformation template will automatically add our EC2 instance to this list.
 
-This process should be repeated for the Tableau Server web app, TSM web app, and Repository.  You will need the ARNs for all three load balancers, for the Cloudformation template
+This process should be repeated for the Tableau Server web app, TSM web app, and Repository.  You will need the ARNs for all three load balancers, for the Cloudformation template.  Once all three load balancers have been created, there is one more step for the Tableau Server and TSM web app load balancers.  For each, find the load balancer in the AWS console and click on the _Listeners_ tab.  You should see 2 listeners, one for HTTP (port 80) and one for HTTPS (port 443).  We want to automatically take traffic coming into port 80, and redirect it perminantly to port 443 to make it use SSL.  Select the HTTP : 80 listener and click edit, then change the default action to redirect the incoming requests to port 443.
 
 ### Route53
 
