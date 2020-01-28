@@ -101,11 +101,22 @@ This next page is where you enter the name of your stack (can be anything), and 
 Once you set your defaults, you probably won't be changing much here excpect for the __InstallerURL__.  This is the link to download Tableau Server, and can be found on the [Tableau releases page](https://www.tableau.com/support/releases/server).  Copy the link for __linux__ than ends with __.rpm__, and paste it into the InstallerURL parameter.  This lets you specify which version of Tableau Server to install each time you run the script.  The reason we took this approach, is to make upgrades easier.  In this case, we install a fresh copy of Tableau Server and just restore all the server configurations and repository (data sources, workbooks, users, etc) once its done installing.
 ![Cloudformation wizard - step 2b](/screenshots/cloudformation-3.png)
 
-The last two pages in the Cloudformation wizard can be left as-is, with no changes.  Once you're ready, click the orange _Create Stack_ button.  Again, while this process is running (installation, configuration, restoring data) all users will leverage the existing Tableau Server.  Once the process is complete (will show as complete in the cloudformation event logs), users will be routed to the new tableau server.  When this happens, the old tableau server will be shut down and de-registered from the load balancer.  We don't terminate the instance, because in case anything goes wrong you can always manually start the old instance and add it back to the load balancers.
+The last two pages in the Cloudformation wizard can be left as-is, with no changes.  Once you're ready, click the orange _Create Stack_ button.  
+
+Again, while this process is running (installation, configuration, restoring data) all users will leverage the existing Tableau Server.  Once the process is complete (will show as complete in the cloudformation event logs), users will be routed to the new tableau server.  When this happens, the old tableau server will be shut down and de-registered from the load balancer.  We don't terminate the instance, because in case anything goes wrong you can always manually start the old instance and add it back to the load balancers.
 
 # Notes
-+ If you're having trouble accessing Tableau Server from your web browser, here are some troubleshooting steps:
-...1. the first thing to check is if Route53 is handling DNS properly.   You can always test if Route53 is the issue, but just copy/pasting the DNS name of your load balancer into the browser. If the load balancer's DNS name resolves, then you know the problem is with Route53.
-...2. Next up is the load balancer.  If your load balancer's DNS name didn't resolve, check out it's target group.  You should be able to see a list of registered instances for the target group, and see if they are healthy or not.  If your instance is not healthy, its a problem on the tableau server side.  
-...3. If the instance is marked as healthy in the target group, its likely an issue with security groups.  Check the security groups of the load balancer and EC2 instance to make sure they allow traffic on ports 80/443.  There may also be ACLs at the VPC or Account level, which limit what kind of traffic is allowed.
+If you're having trouble accessing Tableau Server from your web browser, here are some troubleshooting steps:
 
+1. The first thing to check is if Route53 is handling DNS properly.   You can always test if Route53 is the issue, but just copy/pasting the DNS name of your load balancer into the browser. If the load balancer's DNS name resolves, then you know the problem is with Route53.
+2. Next up is the load balancer.  If your load balancer's DNS name didn't resolve, check out it's target group.  You should be able to see a list of registered instances for the target group, and see if they are healthy or not.  If your instance is not healthy, its a problem on the tableau server side.  
+3. If the instance is marked as healthy in the target group, its likely an issue with security groups.  Check the security groups of the load balancer and EC2 instance to make sure they allow traffic on ports 80/443.  There may also be ACLs at the VPC or Account level, which limit what kind of traffic is allowed.
+
+
+If you're wondering how the EC2 instance gets setup with Tableau Server, the magic comes from the TableauServerEC2's _AWS::CloudFormation::Init_ section.  Here, we define a config set that performs a series of actions.  
+1. Step one is to install all prerequisite packages on the new instance (like postgres odbc driver and the aws cli).  The automated backup script is also installed and scheduled, using CRON
+2. Create a new local user, which is used to install Tableau Server
+3. Download the most recent backups from our S3 bucket
+4. Use Tableau's [Automated Installer](https://github.com/tableau/server-install-script-samples/tree/master/linux/automated-installer?_fsi=6G9o6EmY) to install tableau
+5. Restore from the latest configuration and tsbak
+6. Update the load balancers to user our new instance, and stop any old instances
