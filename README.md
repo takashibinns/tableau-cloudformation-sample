@@ -3,12 +3,16 @@
 This project is meant to help Tableau Server admins who have deployed in AWS.  Tableau provides a few [quickstarts](https://aws.amazon.com/quickstart/architecture/tableau-server/), which help create a robust environment for your Tableau Server, but what if you just need something a bit simpler?  The idea behind this quick start is to help admins quickly spin up a new instances of their tableau server, import the configuration settings, restore data from the latest backup, and enable automated backups going forward.  It also lets you specify which version of Tableau Server you want to install, making upgrades seamless.  All of this can happen with just a few configuration steps in CloudFormation, and all without any downtime for your end users.
 
 # How it works
+Cloudformation is a great way to instantiate new resources in AWS, based on a template of what you need and how they communicate with each other.  This project shows how you can use Cloudformation to automatically create a new EC2 instance, install Tableau Server, and restore from your latest backup.  There are several ways to setup your environment, but this approach was used to minimize downtime for end users.  We start with Route53 taking care of DNS and routing all incoming traffic to a series of Load Balancers.  This allows you to create friendly URLs for all the applications you want to provide access to.  For example you could have analytics.company.com go to your Tableau Server's web app, tsm.analytics.company.com go to your Tableau Server's TSM, and repo.analytics.company.com be the URL for your Tableau Server's postgres db.
 
+![AWS Architecture](/screenshots/Overview.png)
+
+In order to provide a seamless user experience, though, we need to differentiate between static resources (always existing) and dynamic resources (created by cloudformation).  In the above diagram Route53 record sets, load balancers, and S3 buckets are static.  This means they should always exist in your environment.  The EC2 instance that runs Tableau Server is created dynamically from our Cloudformation template, and gets added to load balancer's target groups.  The first time you run the cloudformation script, you'll be adding your first Tableau Server to the load balancer.  The second time you run the cloudformation script, it will create the new EC2 instance but wait until Tableau Server is installed and restored from the latest backup, before adding it to the load balancer and removing the old instance.  It's this process of waiting for the install/restore to complete that lets end users access the old instance before swapping in the new one.
 
 
 # Instructions
 
-## Step 1: Get your AWS environment setup
+## Step 1: Setup your AWS environment's static assets
 
 ### IAM Role
 In order for your new EC2 instance to complete it's setup, it needs permission to talk to the other AWS services.  It does this by using an IAM role, which defines what permissions the instance has.  In the AWS console, search for the __IAM__ page and navigate to __Roles__ in the left navigation.  From here, you can click the blue button to create a new role.  The first thing to do is select the type of entity that will be using the role.  Select EC2 as the service type, and then move onto Permissions.
@@ -49,8 +53,59 @@ Now that our load balancers are ready, we just have to map them to friendly URLs
 ![Image of record set](/screenshots/route53.png)
 
 ## Step 2: Configure your Cloudformation template
+Now that all our static assets are ready, we need to make some minor tweaks to our cloudformation template.  Download the template file from this github repo, and open using a text editor.  If you are familiar with JSON, you should recognize that the template is just a large JSON object.  The important pieces to change are located in the Mappings section of this file.  
+```json
+"Mappings" : {
+    "aws": {
+      "LoadBalancerTargetGroup": {
+        "tableauserver": "<your-tableau-server-load-balancer-target-group-arn>",
+        "tsm": "<your-tsm-load-balancer-target-group-arn>",
+        "repo": "<your-repository-load-balancer-target-group-arn>"
+      },
+      "s3": {
+        "bucket": "<your-s3-bucket-name>",
+        "backups": "/path/to/backups"
+      },
+      "ec2": {
+        "ami": "ami-0c5204531f799e0c6",
+        "securitygroups": "<security-group1>,<security-group2>,<etc>",
+        "iaminstanceprofile": "<your-iam-role-name>"
+      }
+    },
+    "tableau": {
+      "Repository":{
+        "user": "readonly",
+        "password": "<repository-password>"
+      },
+      "AutomatedInstaller": {
+        "url": "https://github.com/tableau/server-install-script-samples/raw/master/linux/automated-installer/packages/tableau-server-automated-installer-2019-1.noarch.rpm",
+        "path" :"/opt/tableau/tableau_server_automated_installer/automated-installer.20191.19.0321.1733"
+      },
+      "Backups": {
+        "script":"https://raw.githubusercontent.com/takashibinns/tableau-cloudformation-sample/master/backup.sh"
+      }
+    }
+  },
+  ```
+This mapping object is broken down into AWS settings, and Tableau settings. Hopefully the AWS section is pretty straightforward, in terms of what is needed for each property.  The only thing to leave as-is, would be the ami.  This ami id is for Amazon Linux 2, which is the standard OS of EC2 instances.  You can change this, but you may need to tweak the cloudformation template if you pick an AMI that uses another package manager (instead of yum)
 
+On the tabluea side, you should really only have to change your repository password.  This is the password assigned to the readonly user in Postgres, in case you access the repository in some workbooks.
 
 ## Step 3: Load the template in AWS Console
+Steps 1 and 2 only need to be complete once.  This step is what you repeat, whenever you want to create a new instance of your Tableau Server.  In the AWS console, search for __CloudFormation__ and navigate to __Stacks__ using the left navigation.  Click the button to _Create Stack_, and select _With new Resources_.  Make sure _Template is Ready_ is selected at the top, and upload your customized cloudformation template.
+![Cloudformation wizard - step 1](/screenshots/cloudformation-1.png)
 
+This next page is where you enter the name of your stack (can be anything), and specify your parameters.  The default values on this page come from the _parameters_ section of your cloudformation template, so you may want to change what values are auto-populated here.  
+![Cloudformation wizard - step 2a](/screenshots/cloudformation-2.png)
+
+Once you set your defaults, you probably won't be changing much here excpect for the __InstallerURL__.  This is the link to download Tableau Server, and can be found on the [Tableau releases page](https://www.tableau.com/support/releases/server).  Copy the link for __linux__ than ends with __.rpm__, and paste it into the InstallerURL parameter.  This lets you specify which version of Tableau Server to install each time you run the script.  The reason we took this approach, is to make upgrades easier.  In this case, we install a fresh copy of Tableau Server and just restore all the server configurations and repository (data sources, workbooks, users, etc) once its done installing.
+![Cloudformation wizard - step 2b](/screenshots/cloudformation-3.png)
+
+The last two pages in the Cloudformation wizard can be left as-is, with no changes.  Once you're ready, click the orange _Create Stack_ button.  Again, while this process is running (installation, configuration, restoring data) all users will leverage the existing Tableau Server.  Once the process is complete (will show as complete in the cloudformation event logs), users will be routed to the new tableau server.  When this happens, the old tableau server will be shut down and de-registered from the load balancer.  We don't terminate the instance, because in case anything goes wrong you can always manually start the old instance and add it back to the load balancers.
+
+# Notes
++ If you're having trouble accessing Tableau Server from your web browser, here are some troubleshooting steps:
+...1. the first thing to check is if Route53 is handling DNS properly.   You can always test if Route53 is the issue, but just copy/pasting the DNS name of your load balancer into the browser. If the load balancer's DNS name resolves, then you know the problem is with Route53.
+...2. Next up is the load balancer.  If your load balancer's DNS name didn't resolve, check out it's target group.  You should be able to see a list of registered instances for the target group, and see if they are healthy or not.  If your instance is not healthy, its a problem on the tableau server side.  
+...3. If the instance is marked as healthy in the target group, its likely an issue with security groups.  Check the security groups of the load balancer and EC2 instance to make sure they allow traffic on ports 80/443.  There may also be ACLs at the VPC or Account level, which limit what kind of traffic is allowed.
 
