@@ -114,6 +114,7 @@ If you're having trouble accessing Tableau Server from your web browser, here ar
 2. Next up is the load balancer.  If your load balancer's DNS name didn't resolve, check out it's target group.  You should be able to see a list of registered instances for the target group, and see if they are healthy or not.  If your instance is not healthy, its a problem on the tableau server side.  
 3. If the instance is marked as healthy in the target group, its likely an issue with security groups.  Check the security groups of the load balancer and EC2 instance to make sure they allow traffic on ports 80/443.  There may also be ACLs at the VPC or Account level, which limit what kind of traffic is allowed.
 
+___
 
 If you're wondering how the EC2 instance gets setup with Tableau Server, the magic comes from the TableauServerEC2's _AWS::CloudFormation::Init_ section.  Here, we define a config set that performs a series of actions.  
 1. Step one is to install all prerequisite packages on the new instance (like postgres odbc driver and the aws cli).  The automated backup script is also installed and scheduled, using CRON
@@ -122,3 +123,7 @@ If you're wondering how the EC2 instance gets setup with Tableau Server, the mag
 4. Use Tableau's [Automated Installer](https://github.com/tableau/server-install-script-samples/tree/master/linux/automated-installer?_fsi=6G9o6EmY) to install tableau
 5. Restore from the latest configuration and tsbak
 6. Update the load balancers to user our new instance, and stop any old instances
+
+___
+
+Wondering what the WaitCondition and WaitHandle items from the Event Log are for? These make sure the Cloudformation stack does not mark itself as complete, just because the EC2 instance was spun up.  Instead it waits until all the initialization scripts are done, before marking the stack as complete.
