@@ -53,7 +53,7 @@ Now that our load balancers are ready, we just have to map them to friendly URLs
 ![Image of record set](/screenshots/route53.png)
 
 ## Step 2: Configure your Cloudformation template
-Now that all our static assets are ready, we need to make some minor tweaks to our cloudformation template.  Download the template file from this github repo, and open using a text editor.  If you are familiar with JSON, you should recognize that the template is just a large JSON object.  The important pieces to change are located in the Mappings section of this file.  
+Now that all our static assets are ready, we need to make some minor tweaks to our cloudformation template.  Download the template file from this github repo, and open using a text editor.  If you are familiar with JSON, you should recognize that the template is just a large JSON object.  The important pieces to change are located in the __Mappings__ section of this file.  
 ```json
 "Mappings" : {
     "aws": {
@@ -90,6 +90,8 @@ Now that all our static assets are ready, we need to make some minor tweaks to o
 This mapping object is broken down into AWS settings, and Tableau settings. Hopefully the AWS section is pretty straightforward, in terms of what is needed for each property.  The only thing to leave as-is, would be the ami.  This ami id is for Amazon Linux 2, which is the standard OS of EC2 instances.  You can change this, but you may need to tweak the cloudformation template if you pick an AMI that uses another package manager (instead of yum)
 
 On the tabluea side, you should really only have to change your repository password.  This is the password assigned to the readonly user in Postgres, in case you access the repository in some workbooks.
+
+You will also need to adjust the __Parameters__ object with a few details.  You will need to specify the IDs of subnets to use (defines where your EC2 instance is deployed), a username and strong password for the local admin account (also your TSM account), and your Tableau license key.
 
 ## Step 3: Load the template in AWS Console
 Steps 1 and 2 only need to be complete once.  This step is what you repeat, whenever you want to create a new instance of your Tableau Server.  In the AWS console, search for __CloudFormation__ and navigate to __Stacks__ using the left navigation.  Click the button to _Create Stack_, and select _With new Resources_.  Make sure _Template is Ready_ is selected at the top, and upload your customized cloudformation template.
