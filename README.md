@@ -108,6 +108,13 @@ The last two pages in the Cloudformation wizard can be left as-is, with no chang
 Again, while this process is running (installation, configuration, restoring data) all users will leverage the existing Tableau Server.  Once the process is complete (will show as complete in the cloudformation event logs), users will be routed to the new tableau server.  When this happens, the old tableau server will be shut down and de-registered from the load balancer.  We don't terminate the instance, because in case anything goes wrong you can always manually start the old instance and add it back to the load balancers.
 
 # Notes
+You will notice this process takes a while.  There are a few steps that contribute to the lengthy setup time:
+* __Downloading Tableau Server Installer__: It can take 5-10 minutes just to download the installer from Tableau's server
+* __Installing Tableau Server__: It can take 20-30 minutes for the installer to run, and complete the install
+* __Restoring from backup__: This part usually takes the longest, as it depends on how large your backups are.  Small backups can take less than 10 minutes, but larger backup can take several hours.
+
+___
+
 If you're having trouble accessing Tableau Server from your web browser, here are some troubleshooting steps:
 
 1. The first thing to check is if Route53 is handling DNS properly.   You can always test if Route53 is the issue, but just copy/pasting the DNS name of your load balancer into the browser. If the load balancer's DNS name resolves, then you know the problem is with Route53.
