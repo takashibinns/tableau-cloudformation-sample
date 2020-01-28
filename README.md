@@ -5,42 +5,48 @@ This project is meant to help Tableau Server admins who have deployed in AWS.  T
 # How it works
 
 
+
 # Instructions
 
 ## Step 1: Get your AWS environment setup
 
 ### IAM Role
-In order for your new EC2 instance to complete it's setup, it needs permission to talk to the other AWS services.  It does this by using an IAM role, which defines what permissions the instance has.  In the AWS console, search for the *IAM* page and navigate to *Roles* in the left navigation.  From here, you can click the blue button to create a new role.  The first thing to do is select the type of entity that will be using the role.  Select EC2 as the service type, and then move onto Permissions.
+In order for your new EC2 instance to complete it's setup, it needs permission to talk to the other AWS services.  It does this by using an IAM role, which defines what permissions the instance has.  In the AWS console, search for the __IAM__ page and navigate to __Roles__ in the left navigation.  From here, you can click the blue button to create a new role.  The first thing to do is select the type of entity that will be using the role.  Select EC2 as the service type, and then move onto Permissions.
+![Image of IAM wizard](/screenshots/iam-1.png)
 
 The next page will ask what tasks the role is allowed to perform.  Make sure to add the following policies:
+![Image of IAM Policies](/screenshots/iam-2.png)
 
 You can add tags to the role if needed, but otherwise just click next to review.  The last page will ask you to give this role a name, then click the create button.  You will need the name of your iam-role for the cloudformation template.
 
 ### S3 Bucket
-We need a place to store our Tableau Server backups, and the best place to do this is in S3.  You can either use an existing bucket, or create a new bucket.  Either way, create a folder within your bucket to store your backups.  You will need this backup folder path as well as the bucket name for the cloudformation template.
+We need a place to store our Tableau Server backups, and the best place to do this is in S3.  You can either use an existing bucket, or create a new bucket.  Either way, search AWS for __S3__ and create a folder within your bucket to store your backups.  You will need this backup folder path as well as the bucket name for the cloudformation template.
 
 An optional setting within S3 is to set a management rule for automatically cleaning up old backups.  You can use a _lifecycle rule_ to automatically delete objects older than _x_ days.
+![Image of S3 lifecycle rule](/screenshots/s3.png)
 
 ### SSL Certificate
-In order to ensure all traffic to your Tableau Server is secure, we need to use a SSL Certificate.  Search in AWS for Certificate Manager, in order to get a certificate.  This process will vary, depending on your AWS configuration and corporate policies, but there is a good guide [here](https://docs.aws.amazon.com/acm/latest/userguide/gs-acm-request-public.html) for helping create your first certificate.  We will use the certificate you create, in when creating our load balancers.
+In order to ensure all traffic to your Tableau Server is secure, we need to use a SSL Certificate.  Search in AWS for __Certificate Manager__, in order to get a certificate.  This process will vary, depending on your AWS configuration and corporate policies, but there is a good guide [here](https://docs.aws.amazon.com/acm/latest/userguide/gs-acm-request-public.html) for helping create your first certificate.  We will use the certificate you create, in when creating our load balancers.
 
 ### Load Balancers
-There are 3 services you may want to expose on your Tableau Server: the Tableau Server web app, TSM, and repository.  In order to safely expose these, you will need a load balancer for each.  The Tableau Server and TSM web apps require application load balancers, and the repository needs a network load balancer.
+There are 3 services you may want to expose on your Tableau Server: the Tableau Server web app, TSM, and repository.  In order to safely expose these, you will need a load balancer for each.  The Tableau Server and TSM web apps require _application load balancers_, and the repository needs a _network load balancer_.
 
-To do this, search for EC2 service and navigate to the Load Balancer page using the left navigation.  Use the blue button to create a load balancer.  For the Tableau Server and TSM web apps, pick an Application Load Balancer.  For the repository, pick a Network Load balancer.  Next, you will need to specify the listener protocols, and availability zones for your load balancer.  For the Tableau Server and TSM web apps, you should have handlers for TCP port 80 and TLS port 443.  For repository, this should be just TCP port 8060.
-
+To do this, search for __EC2__ service and navigate to the __Load Balancer__ page using the left navigation.  Use the blue button to create a load balancer.  For the Tableau Server and TSM web apps, pick an Application Load Balancer.  For the repository, pick a Network Load balancer.  Next, you will need to specify the listener protocols, and availability zones for your load balancer.  For the Tableau Server and TSM web apps, you should have handlers for TCP port 80 and TLS port 443.  For repository, this should be just TCP port 8060.
+![Image of Load Balancer wizard](/screenshots/load-balancer-1.png)
 
 Next, we need to configure the security settings.  Your certificate type should be set to _Choose a certificate from ACM_.  Make sure the right SSL certificate is selected from the dropdown list, and click next.
 
-Security groups will depend on your AWS settings.  My setup includes a default group, which enables all communication on all ports to objects within the VPC.  I also have a second group, which allows traffic (web, ssl, db) to my Tableau Server.  In my example, I make sure both of these are checked for my load balancer.
+Security groups will depend on your AWS settings.  My setup includes a default group, which enables all communication on all ports to objects within the VPC.  I also have a second group, which allows traffic (web, ssl, db) to my Tableau Server.  In my case, I make sure both of these are checked for my load balancer.
 
 The next step for configuring your load balancer is to setup a new target group.  This defines the group of EC2 instances that will receive incoming HTTP requests.  Give your group a name, and leave the rest of the settings.  The last step is to pick your EC2 instances as targets.  We can leave this blank, since the Cloudformation template will automatically add our EC2 instance to this list.
+![Image of Target Group config](/screenshots/load-balancer-2.png)
 
-This process should be repeated for the Tableau Server web app, TSM web app, and Repository.  You will need the ARNs for all three load balancers, for the Cloudformation template.  Once all three load balancers have been created, there is one more step for the Tableau Server and TSM web app load balancers.  For each, find the load balancer in the AWS console and click on the _Listeners_ tab.  You should see 2 listeners, one for HTTP (port 80) and one for HTTPS (port 443).  We want to automatically take traffic coming into port 80, and redirect it perminantly to port 443 to make it use SSL.  Select the HTTP : 80 listener and click edit, then change the default action to redirect the incoming requests to port 443.
+This process should be repeated for the Tableau Server web app, TSM web app, and Repository.  You will need the ARNs for all three load balancers, for the Cloudformation template.  Once all three load balancers have been created, there is one more step for the Tableau Server and TSM web app load balancers.  For each, find the load balancer in the AWS console and click on the _Listeners_ tab.  You should see 2 listeners, one for HTTP (port 80) and one for HTTPS (port 443).  We want to automatically take traffic coming into port 80, and redirect it perminantly to port 443 to make it use SSL.  Select the *HTTP : 80* listener and click edit, then change the default action to redirect the incoming requests to port 443.
+![Image of updating listeners](/screenshots/load-balancer-2.png)
 
 ### Route53
-
-
+Now that our load balancers are ready, we just have to map them to friendly URLs.  Search AWS for __Route53__ and click on hosted zones, then click on your domain.  This process may also vary based on your AWS configuration and corporate policies, but in my case I have a domain for healthcare.tableau.com.  Within Route53, you can add _record sets_ which allow you to map URLs to objects in AWS (our load balancers).  For each of your load balancers, create a new record set of __Type A__ and select __Alias: Yes__.  You should now have a dropdown box to pick the target, with a list of your load balancers (and other objects in AWS).  Select the appropriate target alias and click save.  Now anyone who enters the url you specified, will get their traffic redirected to your load balancer.
+![Image of record set](/screenshots/route53.png)
 
 ## Step 2: Configure your Cloudformation template
 
