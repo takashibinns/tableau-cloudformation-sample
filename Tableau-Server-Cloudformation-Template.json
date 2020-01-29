@@ -10,6 +10,7 @@
           },
           "Parameters": [
             "InstanceType",
+            "StorageSize",
             "SubnetID",
             "KeyName"
           ]
@@ -38,7 +39,7 @@
       "Description" : "EC2 instance type",
       "Type" : "String",
       "Default" : "m5.4xlarge",
-      "AllowedValues" : [ "m5.2xlarge", "m5.4xlarge", "m5.8xlarge"],
+      "AllowedValues" : [ "m5.2xlarge", "m5.4xlarge", "m5.8xlarge","m5.12xlarge","m5.16xlarge","m5.24xlarge"],
       "ConstraintDescription" : "must be a valid EC2 instance type."
     },
     "StorageSize" : {
@@ -49,8 +50,7 @@
     "SubnetID" : {
       "Description" : "Subnet ID: Where should the new Tableau Server live?",
       "Type" : "String",
-      "Default" : "<my-subnet-id>",
-      "AllowedValues" : [ "<subnet-1", "subnet-2"]
+      "AllowedValues" : [ "subnet-a", "subnet-b"]
     },
     "AdminUsername" : {
       "Description" : "Username for the local admin user (cannot be 'tableau' or 'tsmagent' or 'admin' or 'root')",
@@ -74,37 +74,38 @@
     "LicenseKey" : {
       "Description" : "License Key to activate Tableau Server",
       "Type" : "String",
-      "Default" : "<my-license-key>"
+      "Default" : "MY-TABLEAU-SERVER-LICENSE-KEY"
     }
   },
   "Mappings" : {
     "aws": {
       "LoadBalancerTargetGroup": {
-        "tableauserver": "arn:aws:elasticloadbalancing:us-west-2:968006055560:targetgroup/test-for-cf/ca15dc21851ca1e0",
-        "tsm": "arn:aws:elasticloadbalancing:us-west-2:968006055560:targetgroup/test-for-cf2/6d4cf677d8eb00fe",
-        "repo": "arn:aws:elasticloadbalancing:us-west-2:968006055560:targetgroup/test-for-cf3/9241ec20778b5d27"
+        "tableauserver": "<your-tableau-server-load-balancer-target-group-arn>",
+        "tsm": "<your-tsm-load-balancer-target-group-arn>",
+        "repo": "<your-repository-load-balancer-target-group-arn>"
       },
       "s3": {
-        "bucket": "<s3-bucket-name>",
+        "bucket": "<your-s3-bucket-name>",
         "backups": "/path/to/backups"
       },
       "ec2": {
         "ami": "ami-0c5204531f799e0c6",
-        "securitygroups": "securitygroup1,securitygroup2,securitygroup3",
-        "iaminstanceprofile": "my-iam-role"
+        "securitygroups": "<security-group-1>,<security-group-2>,<security-group-n>",
+        "iaminstanceprofile": "<your-iam-role-name>"
       }
     },
     "tableau": {
       "Repository":{
         "user": "readonly",
-        "password": "my-strong-repository-password"
+        "password": "<repository-password>"
       },
       "AutomatedInstaller": {
         "url": "https://github.com/tableau/server-install-script-samples/raw/master/linux/automated-installer/packages/tableau-server-automated-installer-2019-1.noarch.rpm",
         "path" :"/opt/tableau/tableau_server_automated_installer/automated-installer.20191.19.0321.1733"
       },
-      "Backups": {
-        "script":"https://raw.githubusercontent.com/takashibinns/tableau-cloudformation-sample/master/backup.sh"
+      "Scripts": {
+        "backup":"https://raw.githubusercontent.com/takashibinns/tableau-cloudformation-sample/master/backup.sh",
+        "updatelb": "https://raw.githubusercontent.com/takashibinns/tableau-cloudformation-sample/master/update-load-balancer.sh"
       }
     }
   },
@@ -184,9 +185,13 @@
                   }
                 }
               },
+              "/tmp/update-load-balancer.sh": {
+                "mode": "550",
+                "source": { "Fn::FindInMap" : [ "tableau", "Scripts", "updatelb"]}
+              },
               "/tmp/backup/backup.sh": {
                 "mode": "550",
-                "source": { "Fn::FindInMap" : [ "tableau", "Backups", "script"]}
+                "source": { "Fn::FindInMap" : [ "tableau", "Scripts", "backup"]}
               },
               "/etc/cron.d/tableau-server-backup": {
                 "content": {
@@ -197,7 +202,7 @@
                       "SHELL=/bin/bash","\n",
                       "PATH=/sbin:/bin:/user/sbin:/usr/bin","\n",
                       "MAILTO=root","\n",
-                      "10 5 * * 7  root  /tmp/backup/backup.sh ",{"Fn::FindInMap": ["aws","s3","bucket"]}," ",{"Fn::FindInMap": ["aws","s3","backups"]}," &>> /tmp/backups.log","\n",
+                      "10 5 * * 7  root  /tmp/backup/backup.sh ",{"Fn::FindInMap": ["aws","s3","bucket"]}," ",{"Fn::FindInMap": ["aws","s3","backups"]}," &>> /tmp/backups.log \n"
                     ]
                   ]
                 }
@@ -394,64 +399,44 @@
           },
           "6":{
             "commands":{
-              "1-clear-lb":{
-                "command": {
+              "1-add-to-ts-lb":{
+                "cwd":"/tmp/",
+                "command":  {
                   "Fn::Join": [
-                    "",
-                    [ "INSTANCES=$(aws elbv2 describe-target-health --target-group-arn ",
+                    " ",
+                    [ 
+                      "./update-load-balancer.sh ",
                       { "Fn::FindInMap" : [ "aws", "LoadBalancerTargetGroup", "tableauserver"]},
-                      " --region ",
                       { "Ref" : "AWS::Region" },
-                      " --query 'TargetHealthDescriptions[*].Target.Id' | tr -dt '[],\"') \n",
-                      "",
-                      "aws ec2 stop-instances --region ",
-                      { "Ref" : "AWS::Region" },
-                      " --instance-ids $INSTANCES "
+                      "true"
                     ]
                   ]
                 }
               },
-              "2-add-to-ts-lb":{
+              "2-add-to-tsm-lb":{
                 "cwd":"/tmp/",
                 "command":  {
                   "Fn::Join": [
-                    "",
-                    [ "INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)\n",
-                      "aws elbv2 register-targets --target-group-arn ",
-                      { "Fn::FindInMap" : [ "aws", "LoadBalancerTargetGroup", "tableauserver"]},
-                      " --region ",
-                      { "Ref" : "AWS::Region" },
-                      " --targets Id=$INSTANCE_ID"
-                    ]
-                  ]
-                }
-              },
-              "3-add-to-tsm-lb":{
-                "cwd":"/tmp/",
-                "command":  {
-                  "Fn::Join": [
-                    "",
-                    [ "INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)\n",
-                      "aws elbv2 register-targets --target-group-arn ",
+                    " ",
+                    [ 
+                      "./update-load-balancer.sh ",
                       { "Fn::FindInMap" : [ "aws", "LoadBalancerTargetGroup", "tsm"]},
-                      " --region ",
                       { "Ref" : "AWS::Region" },
-                      " --targets Id=$INSTANCE_ID"
+                      "false"
                     ]
                   ]
                 }
               },
-              "4-add-to-repo-lb":{
+              "3-add-to-repo-lb":{
                 "cwd":"/tmp/",
                 "command":  {
                   "Fn::Join": [
-                    "",
-                    [ "INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id)\n",
-                      "aws elbv2 register-targets --target-group-arn ",
+                    " ",
+                    [ 
+                      "./update-load-balancer.sh ",
                       { "Fn::FindInMap" : [ "aws", "LoadBalancerTargetGroup", "repo"]},
-                      " --region ",
                       { "Ref" : "AWS::Region" },
-                      " --targets Id=$INSTANCE_ID"
+                      "false"
                     ]
                   ]
                 }
@@ -485,7 +470,13 @@
         "KeyName" : { "Ref" : "KeyName" },
         "ImageId" : { "Fn::FindInMap" : [ "aws", "ec2", "ami"]},
         "Tags": [
-          {"Key": "Description", "Value":"EC2 Instance for our Tableau Server"}
+          {"Key": "Name", "Value":"New Tableau Server"},
+          {"Key": "Description", "Value":"EC2 Instance for the Healthcare Teams Tableau Server"},
+          {"Key": "Environment", "Value":"Production"},
+          {"Key": "Group", "Value":"cust-consult-healthcare"},
+          {"Key": "DeptCode", "Value":"428"},
+          {"Key": "Creator", "Value":"tbinns@tableau.com"},
+          {"Key": "Application", "Value":"EC2 Instance"}
         ],
         "UserData" : { 
           "Fn::Base64" : { 
@@ -494,12 +485,24 @@
               [
                "#!/bin/bash -xe\n",
                "",
+               "# Add tags to EC2 Instance root volume\n",
+               "AWS_AVAIL_ZONE=$(curl http://169.254.169.254/latest/meta-data/placement/availability-zone) \n",
+               "AWS_INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id) \n",
+               "ROOT_VOLUME_IDS=$(aws ec2 describe-instances --region ", { "Ref" : "AWS::Region" }, " --instance-id $AWS_INSTANCE_ID --output text --query Reservations[0].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId) \n",
+               "aws ec2 create-tags --resources $ROOT_VOLUME_IDS --region ", { "Ref" : "AWS::Region" }, " --tags ",
+               "'Key=Name,Value=\"Healthcare Tableau Server volume\"' ",
+               "'Key=Description,Value=\"EBS volume for Healthcare Tableau Server\"' ",
+               "'Key=Environment,Value=\"Production\"' ",
+               "'Key=Group,Value=\"cust-consult-healthcare\"' ",
+               "'Key=DeptCode,Value=\"428\"' ",
+               "'Key=Creator,Value=\"tbinns@tableau.com\"' ",
+               "'Key=Application,Value=\"EBS Volume\"' \n",
+               "",
                "# Update name tag for this instance \n",
                "NEW_NAME=\"Tableau Server ($(date +%m-%d-%Y))\" \n",
-               "AWS_INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id) \n",
-               "aws ec2 create-tags --resources $AWS_INSTANCE_ID --region ", { "Ref" : "AWS::Region" }, " --tags Key=Name,Value=\"$NEW_NAME\" \n",
+               "aws ec2 create-tags --resources $AWS_INSTANCE_ID --region ", { "Ref" : "AWS::Region" }, " --tags ",
+               "Key=Name,Value=\"$NEW_NAME\" \n",
                "",
-               "# Install the files and packages from the metadata\n",
                "/opt/aws/bin/cfn-init -v ",
                "         --stack ", { "Ref" : "AWS::StackName" },
                "         --resource TableauServerEC2 ",
@@ -507,7 +510,7 @@
                "         --region ", { "Ref" : "AWS::Region" }, "\n",
                "",
                "# Signal the status from this instance\n",
-               "/opt/aws/bin/cfn-signal -e $? --stack ", { "Ref": "AWS::StackName"}, " --resource TableauServerEC2 --region ", {"Ref": "AWS::Region"}, "\n"
+               "/opt/aws/bin/cfn-signal -e $? -r \"Installation and restore complete\" \"", { "Ref" : "WaitHandle"}, "\" \n"
               ]
             ]
           }
@@ -522,7 +525,7 @@
       "DependsOn" : "TableauServerEC2",
       "Properties" : {
         "Handle" : {"Ref" : "WaitHandle"},
-        "Timeout" : "10800"
+        "Timeout" : "7200"
       }
     }
   },
