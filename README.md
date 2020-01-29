@@ -112,6 +112,13 @@ The last two pages in the Cloudformation wizard can be left as-is, with no chang
 
 Again, while this process is running (installation, configuration, restoring data) all users will leverage the existing Tableau Server.  Once the process is complete (will show as complete in the cloudformation event logs), users will be routed to the new tableau server.  When this happens, the old tableau server will be shut down and de-registered from the load balancer.  We don't terminate the instance, because in case anything goes wrong you can always manually start the old instance and add it back to the load balancers.
 
+# Accessing the Instance
+Now that your Tableau Server is up and running, how do you access it?  The easy way is to use AWS Systems Manager to SSH into the instance.  Search AWS console for __Systems Manager__, and click on __Session Manager__ from the left navigation.  This will show you any active sessions, but if it's the first time using this you won't see any yet.  Click on the orange _Start Session_ button, which will show you a list of instances running in your VPC.  You should see your Tableau Server's instance in the list, so click on it and then click the orange _Start Session_ button.  
+![Session Manager UI](/screenshots/systems-manager-1.png)
+
+This will open a new tab, which is already SSHed into your instance.  The default user can run sudo commands (be careful) so you should be able to do whatever you need to (check log files, manually trigger the backup script, etc).  In order to run TSM commands, though, you will want to switch to your local admin user account (from the Cloudformation script).  By switching to the local admin account, the Tableau Server directory will already be part of the path so you can run TSM commands by just typing TSM.
+![Session Manager - SSH](/screenshots/systems-manager-2.png)
+
 # Notes
 You will notice this process takes a while.  There are a few steps that contribute to the lengthy setup time:
 * __Downloading Tableau Server Installer__: It can take 5-10 minutes just to download the installer from Tableau's server
