@@ -24,7 +24,9 @@ The next page will ask what tasks the role is allowed to perform.  Make sure to 
 You can add tags to the role if needed, but otherwise just click next to review.  The last page will ask you to give this role a name, then click the create button.  You will need the name of your iam-role for the cloudformation template.
 
 ### S3 Bucket
-We need a place to store our Tableau Server backups, and the best place to do this is in S3.  You can either use an existing bucket, or create a new bucket.  Either way, search AWS for __S3__ and create a folder within your bucket to store your backups.  You will need this backup folder path as well as the bucket name for the cloudformation template.
+We need a place to store our Tableau Server backups, and the best place to do this is in S3.  You can either use an existing bucket, or create a new bucket.  Either way, search AWS for __S3__ and create a folder within your bucket to store your backups.  You will need this backup folder path as well as the bucket name for the cloudformation template.  
+
+In order to perform the first restore, you will need a [tsbak](https://help.tableau.com/current/server/en-us/db_backup.htm#create-a-backup-using-the-tsm-command-line-interface-cli) and [settings config](https://help.tableau.com/current/server/en-us/cli_settings_tsm.htm#TSMExport) file in this bucket.  The tsbak file can have any name as long as it has the ".tsbak" extension, and the settings config file must end with "settings.json".
 
 An optional setting within S3 is to set a management rule for automatically cleaning up old backups.  You can use a _lifecycle rule_ to automatically delete objects older than _x_ days.
 ![Image of S3 lifecycle rule](/screenshots/s3.png)
@@ -68,7 +70,7 @@ Now that all our static assets are ready, we need to make some minor tweaks to o
       },
       "ec2": {
         "ami": "ami-0c5204531f799e0c6",
-        "securitygroups": "<security-group1>,<security-group2>,<etc>",
+        "securitygroups": "<security-group-1>,<security-group-2>,<security-group-n>",
         "iaminstanceprofile": "<your-iam-role-name>"
       }
     },
@@ -81,8 +83,9 @@ Now that all our static assets are ready, we need to make some minor tweaks to o
         "url": "https://github.com/tableau/server-install-script-samples/raw/master/linux/automated-installer/packages/tableau-server-automated-installer-2019-1.noarch.rpm",
         "path" :"/opt/tableau/tableau_server_automated_installer/automated-installer.20191.19.0321.1733"
       },
-      "Backups": {
-        "script":"https://raw.githubusercontent.com/takashibinns/tableau-cloudformation-sample/master/backup.sh"
+      "Scripts": {
+        "backup":"https://raw.githubusercontent.com/takashibinns/tableau-cloudformation-sample/master/backup.sh",
+        "updatelb": "https://raw.githubusercontent.com/takashibinns/tableau-cloudformation-sample/master/update-load-balancer.sh"
       }
     }
   },
@@ -92,6 +95,8 @@ This mapping object is broken down into AWS settings, and Tableau settings. Hope
 On the tabluea side, you should really only have to change your repository password.  This is the password assigned to the readonly user in Postgres, in case you access the repository in some workbooks.
 
 You will also need to adjust the __Parameters__ object with a few details.  You will need to specify the IDs of subnets to use (defines where your EC2 instance is deployed), a username and strong password for the local admin account (also your TSM account), and your Tableau license key.
+
+The last part to adjust will be on like 164, which contains your license registration information.  This is the same information you type in, when first activating your Tableau Server license.  
 
 ## Step 3: Load the template in AWS Console
 Steps 1 and 2 only need to be complete once.  This step is what you repeat, whenever you want to create a new instance of your Tableau Server.  In the AWS console, search for __CloudFormation__ and navigate to __Stacks__ using the left navigation.  Click the button to _Create Stack_, and select _With new Resources_.  Make sure _Template is Ready_ is selected at the top, and upload your customized cloudformation template.
@@ -112,6 +117,10 @@ You will notice this process takes a while.  There are a few steps that contribu
 * __Downloading Tableau Server Installer__: It can take 5-10 minutes just to download the installer from Tableau's server
 * __Installing Tableau Server__: It can take 20-30 minutes for the installer to run, and complete the install
 * __Restoring from backup__: This part usually takes the longest, as it depends on how large your backups are.  Small backups can take less than 10 minutes, but larger backup can take several hours.
+
+___
+
+If you wish to adjust the automatic backup schedule, this can be done in the Cloudformation template. Line 198 contains the cron script that executes the backup.  The default schedule is 10 5 * * 7, which equates to 5:10am every sunday morning (weekly).  If you want a different schedule, you can adjust it here.  If you're not familiar with CRON syntax, check out [this guide](https://crontab.guru/#10_5_*_*_7)
 
 ___
 
