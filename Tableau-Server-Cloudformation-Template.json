@@ -470,13 +470,7 @@
         "KeyName" : { "Ref" : "KeyName" },
         "ImageId" : { "Fn::FindInMap" : [ "aws", "ec2", "ami"]},
         "Tags": [
-          {"Key": "Name", "Value":"New Tableau Server"},
-          {"Key": "Description", "Value":"EC2 Instance for the Healthcare Teams Tableau Server"},
-          {"Key": "Environment", "Value":"Production"},
-          {"Key": "Group", "Value":"cust-consult-healthcare"},
-          {"Key": "DeptCode", "Value":"428"},
-          {"Key": "Creator", "Value":"tbinns@tableau.com"},
-          {"Key": "Application", "Value":"EC2 Instance"}
+          {"Key": "Name", "Value":"New Tableau Server"}
         ],
         "UserData" : { 
           "Fn::Base64" : { 
@@ -485,24 +479,13 @@
               [
                "#!/bin/bash -xe\n",
                "",
-               "# Add tags to EC2 Instance root volume\n",
-               "AWS_AVAIL_ZONE=$(curl http://169.254.169.254/latest/meta-data/placement/availability-zone) \n",
+               "# Update name tag for this instance to include todays date \n",
                "AWS_INSTANCE_ID=$(curl http://169.254.169.254/latest/meta-data/instance-id) \n",
-               "ROOT_VOLUME_IDS=$(aws ec2 describe-instances --region ", { "Ref" : "AWS::Region" }, " --instance-id $AWS_INSTANCE_ID --output text --query Reservations[0].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId) \n",
-               "aws ec2 create-tags --resources $ROOT_VOLUME_IDS --region ", { "Ref" : "AWS::Region" }, " --tags ",
-               "'Key=Name,Value=\"Healthcare Tableau Server volume\"' ",
-               "'Key=Description,Value=\"EBS volume for Healthcare Tableau Server\"' ",
-               "'Key=Environment,Value=\"Production\"' ",
-               "'Key=Group,Value=\"cust-consult-healthcare\"' ",
-               "'Key=DeptCode,Value=\"428\"' ",
-               "'Key=Creator,Value=\"tbinns@tableau.com\"' ",
-               "'Key=Application,Value=\"EBS Volume\"' \n",
-               "",
-               "# Update name tag for this instance \n",
                "NEW_NAME=\"Tableau Server ($(date +%m-%d-%Y))\" \n",
                "aws ec2 create-tags --resources $AWS_INSTANCE_ID --region ", { "Ref" : "AWS::Region" }, " --tags ",
                "Key=Name,Value=\"$NEW_NAME\" \n",
                "",
+               "# Kick off the initialization scripts \n",
                "/opt/aws/bin/cfn-init -v ",
                "         --stack ", { "Ref" : "AWS::StackName" },
                "         --resource TableauServerEC2 ",
